@@ -29,6 +29,7 @@ const (
 	AuthStyleAutoDetect = 0 // Auto-detect based on server response
 	AuthStyleInParams   = 1 // Send client_id and client_secret as POST parameters
 	AuthStyleInHeader   = 2 // Send as Basic Auth header
+	AuthStylePublicPKCE = 3 // Send client_id and PKCE verifier without client_secret
 )
 
 // GenericOAuthProvider implements OAuth for custom/generic OAuth providers
@@ -99,6 +100,13 @@ func (p *GenericOAuthProvider) ExchangeToken(ctx context.Context, code string, c
 	values.Set("grant_type", "authorization_code")
 	values.Set("code", code)
 	values.Set("redirect_uri", redirectUri)
+	codeVerifier := strings.TrimSpace(c.Query("code_verifier"))
+	if codeVerifier != "" {
+		values.Set("code_verifier", codeVerifier)
+		if p.config.Scopes != "" {
+			values.Set("scope", p.config.Scopes)
+		}
+	}
 
 	// Determine auth style
 	authStyle := p.config.AuthStyle
@@ -113,6 +121,8 @@ func (p *GenericOAuthProvider) ExchangeToken(ctx context.Context, code string, c
 	if authStyle == AuthStyleInParams {
 		values.Set("client_id", p.config.ClientId)
 		values.Set("client_secret", p.config.ClientSecret)
+	} else if authStyle == AuthStylePublicPKCE {
+		values.Set("client_id", p.config.ClientId)
 	}
 
 	req, err = http.NewRequestWithContext(ctx, "POST", p.config.TokenEndpoint, strings.NewReader(values.Encode()))

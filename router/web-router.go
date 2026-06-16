@@ -3,6 +3,9 @@ package router
 import (
 	"embed"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -29,6 +32,23 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
+	dcOAuthBridgeURL := strings.TrimSpace(os.Getenv("DC_OAUTH_BRIDGE_URL"))
+	if dcOAuthBridgeURL != "" {
+		dcOAuthBridgeTarget, err := url.Parse(dcOAuthBridgeURL)
+		if err != nil {
+			common.SysError("invalid DC_OAUTH_BRIDGE_URL: " + err.Error())
+		} else {
+			dcOAuthBridgeProxy := httputil.NewSingleHostReverseProxy(dcOAuthBridgeTarget)
+			dcOAuthBridgeProxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
+				common.SysError("dc-oauth bridge proxy failed: " + err.Error())
+				http.Error(rw, "dc-oauth bridge unavailable", http.StatusBadGateway)
+			}
+			router.Any("/dc-oauth/*path", func(c *gin.Context) {
+				c.Set(middleware.RouteTagKey, "dc-oauth")
+				dcOAuthBridgeProxy.ServeHTTP(c.Writer, c.Request)
+			})
+		}
+	}
 	router.Use(static.Serve("/", themeFS))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")

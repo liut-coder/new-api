@@ -35,6 +35,36 @@ type LogoutRequestConfig = AxiosRequestConfig & {
   skipErrorHandler?: boolean
 }
 
+const DC_OAUTH_SLUG = 'dc'
+const DC_OAUTH_CALLBACK_PATH = '/dc-oauth/callback'
+const PKCE_STORAGE_PREFIX = 'oauth:pkce'
+const PKCE_CHARS =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'
+
+const base64UrlEncode = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+const createPkcePair = async () => {
+  const values = new Uint32Array(64)
+  window.crypto.getRandomValues(values)
+  const verifier = Array.from(
+    values,
+    (value) => PKCE_CHARS[value % PKCE_CHARS.length]
+  ).join('')
+  const data = new TextEncoder().encode(verifier)
+  const digest = await window.crypto.subtle.digest('SHA-256', data)
+  return {
+    verifier,
+    challenge: base64UrlEncode(digest),
+  }
+}
+
 /**
  * Hook for managing OAuth login
  */
@@ -201,14 +231,26 @@ export function useOAuthLogin(status: SystemStatus | null) {
         return
       }
 
-      const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)
+      const isDcOAuth = provider.slug === DC_OAUTH_SLUG
+      const redirectUri = isDcOAuth
+        ? `${window.location.origin}${DC_OAUTH_CALLBACK_PATH}`
+        : `${window.location.origin}/oauth/${provider.slug}`
       url.searchParams.set('client_id', provider.client_id)
       url.searchParams.set('redirect_uri', redirectUri)
       url.searchParams.set('response_type', 'code')
       url.searchParams.set('state', state)
       if (provider.scopes) {
         url.searchParams.set('scope', provider.scopes)
+      }
+      if (isDcOAuth) {
+        const pkce = await createPkcePair()
+        window.sessionStorage.setItem(
+          `${PKCE_STORAGE_PREFIX}:${provider.slug}:${state}`,
+          pkce.verifier
+        )
+        url.searchParams.set('code_challenge', pkce.challenge)
+        url.searchParams.set('code_challenge_method', 'S256')
       }
 
       window.open(url.toString(), '_self')

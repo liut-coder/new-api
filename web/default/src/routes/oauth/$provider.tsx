@@ -35,6 +35,8 @@ type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
 }
 
+const PKCE_STORAGE_PREFIX = 'oauth:pkce'
+
 function OAuthCallback() {
   const navigate = useNavigate()
   const { provider } = useParams({ from: '/oauth/$provider' }) as {
@@ -163,8 +165,20 @@ function OAuthCallback() {
       }
 
       try {
+        let codeVerifier: string | null = null
+        if (typeof window !== 'undefined' && search.state) {
+          const pkceKey = `${PKCE_STORAGE_PREFIX}:${provider}:${search.state}`
+          codeVerifier = window.sessionStorage.getItem(pkceKey)
+          if (codeVerifier) {
+            window.sessionStorage.removeItem(pkceKey)
+          }
+        }
         const config: OAuthRequestConfig = {
-          params: { code: search.code, state: search.state },
+          params: {
+            code: search.code,
+            state: search.state,
+            ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
+          },
           skipBusinessError: true,
         }
         const res = await api.get(`/api/oauth/${provider}`, config)

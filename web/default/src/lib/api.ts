@@ -191,7 +191,7 @@ export async function getUserModels(): Promise<{
   message?: string
   data?: string[]
 }> {
-  const res = await api.get('/api/user/models')
+  const res = await api.get('/api/user/self/models')
   return res.data
 }
 

@@ -17,12 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
-import type { RankingPeriod, RankingsSnapshot } from './types'
+import type { RankingPeriod, UsageRankingsSnapshot } from './types'
 
 type RankingsResponse = {
   success: boolean
   message?: string
-  data: RankingsSnapshot
+  data: UsageRankingsSnapshot
 }
 
 export async function getRankings(

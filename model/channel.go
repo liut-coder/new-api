@@ -542,14 +542,22 @@ func (channel *Channel) Update() error {
 			if strings.HasPrefix(trimmed, "[") {
 				var arr []json.RawMessage
 				if err := common.Unmarshal([]byte(trimmed), &arr); err == nil {
-					keys = make([]string, len(arr))
-					for i, v := range arr {
-						keys[i] = string(v)
+					keys = make([]string, 0, len(arr))
+					for _, v := range arr {
+						key := strings.TrimSpace(string(v))
+						if key != "" {
+							keys = append(keys, key)
+						}
 					}
 				}
 			}
 			if len(keys) == 0 { // fallback to newline split
-				keys = strings.Split(strings.Trim(keyStr, "\n"), "\n")
+				for _, key := range strings.Split(strings.Trim(keyStr, "\n"), "\n") {
+					key = strings.TrimSpace(key)
+					if key != "" {
+						keys = append(keys, key)
+					}
+				}
 			}
 		}
 		channel.ChannelInfo.MultiKeySize = len(keys)

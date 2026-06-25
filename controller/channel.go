@@ -586,6 +586,61 @@ func getVertexArrayKeys(keys string) ([]string, error) {
 	return cleanKeys, nil
 }
 
+func cleanPlainChannelKeys(keys string) []string {
+	cleanKeys := make([]string, 0)
+	for _, key := range strings.Split(keys, "\n") {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			cleanKeys = append(cleanKeys, key)
+		}
+	}
+	return cleanKeys
+}
+
+func parseSubmittedChannelKeys(channel *model.Channel) ([]string, error) {
+	if channel == nil || strings.TrimSpace(channel.Key) == "" {
+		return nil, nil
+	}
+	if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+		if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
+			return getVertexArrayKeys(channel.Key)
+		}
+		return []string{strings.TrimSpace(channel.Key)}, nil
+	}
+	return cleanPlainChannelKeys(channel.Key), nil
+}
+
+func parseStoredChannelKeys(channel *model.Channel) []string {
+	if channel == nil || strings.TrimSpace(channel.Key) == "" {
+		return nil
+	}
+
+	trimmedKey := strings.TrimSpace(channel.Key)
+	if strings.HasPrefix(trimmedKey, "[") {
+		var arr []json.RawMessage
+		if err := json.Unmarshal([]byte(trimmedKey), &arr); err == nil {
+			keys := make([]string, 0, len(arr))
+			for _, v := range arr {
+				key := strings.TrimSpace(string(v))
+				if key != "" {
+					keys = append(keys, key)
+				}
+			}
+			return keys
+		}
+	}
+
+	if channel.ChannelInfo.IsMultiKey {
+		return cleanPlainChannelKeys(channel.Key)
+	}
+
+	if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+		return []string{trimmedKey}
+	}
+
+	return cleanPlainChannelKeys(channel.Key)
+}
+
 func AddChannel(c *gin.Context) {
 	addChannelRequest := AddChannelRequest{}
 	err := c.ShouldBindJSON(&addChannelRequest)
@@ -621,14 +676,7 @@ func AddChannel(c *gin.Context) {
 			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(array)
 			addChannelRequest.Channel.Key = strings.Join(array, "\n")
 		} else {
-			cleanKeys := make([]string, 0)
-			for _, key := range strings.Split(addChannelRequest.Channel.Key, "\n") {
-				if key == "" {
-					continue
-				}
-				key = strings.TrimSpace(key)
-				cleanKeys = append(cleanKeys, key)
-			}
+			cleanKeys := cleanPlainChannelKeys(addChannelRequest.Channel.Key)
 			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(cleanKeys)
 			addChannelRequest.Channel.Key = strings.Join(cleanKeys, "\n")
 		}
@@ -922,6 +970,12 @@ func UpdateChannel(c *gin.Context) {
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {
 		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
+		if !channel.ChannelInfo.IsMultiKey {
+			channel.ChannelInfo.IsMultiKey = true
+			channel.ChannelInfo.MultiKeyStatusList = nil
+			channel.ChannelInfo.MultiKeyDisabledTime = nil
+			channel.ChannelInfo.MultiKeyDisabledReason = nil
+		}
 	}
 
 	// 处理多key模式下的密钥追加/覆盖逻辑
@@ -929,79 +983,53 @@ func UpdateChannel(c *gin.Context) {
 		switch *channel.KeyMode {
 		case "append":
 			// 追加模式：将新密钥添加到现有密钥列表
-			if originChannel.Key != "" {
-				var newKeys []string
-				var existingKeys []string
-
-				// 解析现有密钥
-				if strings.HasPrefix(strings.TrimSpace(originChannel.Key), "[") {
-					// JSON数组格式
-					var arr []json.RawMessage
-					if err := json.Unmarshal([]byte(strings.TrimSpace(originChannel.Key)), &arr); err == nil {
-						existingKeys = make([]string, len(arr))
-						for i, v := range arr {
-							existingKeys[i] = string(v)
-						}
-					}
-				} else {
-					// 换行分隔格式
-					existingKeys = strings.Split(strings.Trim(originChannel.Key, "\n"), "\n")
-				}
-
-				// 处理 Vertex AI 的特殊情况
-				if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
-					// 尝试解析新密钥为JSON数组
-					if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
-						array, err := getVertexArrayKeys(channel.Key)
-						if err != nil {
-							c.JSON(http.StatusOK, gin.H{
-								"success": false,
-								"message": "追加密钥解析失败: " + err.Error(),
-							})
-							return
-						}
-						newKeys = array
-					} else {
-						// 单个JSON密钥
-						newKeys = []string{channel.Key}
-					}
-				} else {
-					// 普通渠道的处理
-					inputKeys := strings.Split(channel.Key, "\n")
-					for _, key := range inputKeys {
-						key = strings.TrimSpace(key)
-						if key != "" {
-							newKeys = append(newKeys, key)
-						}
-					}
-				}
-
-				seen := make(map[string]struct{}, len(existingKeys)+len(newKeys))
-				for _, key := range existingKeys {
-					normalized := strings.TrimSpace(key)
-					if normalized == "" {
-						continue
-					}
-					seen[normalized] = struct{}{}
-				}
-				dedupedNewKeys := make([]string, 0, len(newKeys))
-				for _, key := range newKeys {
-					normalized := strings.TrimSpace(key)
-					if normalized == "" {
-						continue
-					}
-					if _, ok := seen[normalized]; ok {
-						continue
-					}
-					seen[normalized] = struct{}{}
-					dedupedNewKeys = append(dedupedNewKeys, normalized)
-				}
-
-				allKeys := append(existingKeys, dedupedNewKeys...)
-				channel.Key = strings.Join(allKeys, "\n")
+			existingKeys := parseStoredChannelKeys(originChannel)
+			newKeys, err := parseSubmittedChannelKeys(&channel.Channel)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "追加密钥解析失败: " + err.Error(),
+				})
+				return
 			}
+
+			seen := make(map[string]struct{}, len(existingKeys)+len(newKeys))
+			for _, key := range existingKeys {
+				seen[key] = struct{}{}
+			}
+
+			dedupedNewKeys := make([]string, 0, len(newKeys))
+			for _, key := range newKeys {
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				dedupedNewKeys = append(dedupedNewKeys, key)
+			}
+
+			allKeys := append(existingKeys, dedupedNewKeys...)
+			channel.Key = strings.Join(allKeys, "\n")
 		case "replace":
-			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
+			replaceKeys, err := parseSubmittedChannelKeys(&channel.Channel)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "替换密钥解析失败: " + err.Error(),
+				})
+				return
+			}
+			if len(replaceKeys) == 0 {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "替换密钥不能为空",
+				})
+				return
+			}
+			channel.Key = strings.Join(replaceKeys, "\n")
+			channel.ChannelInfo.MultiKeyStatusList = nil
+			channel.ChannelInfo.MultiKeyDisabledTime = nil
+			channel.ChannelInfo.MultiKeyDisabledReason = nil
+			channel.ChannelInfo.MultiKeyPollingIndex = 0
 		}
 	}
 	err = channel.Update()

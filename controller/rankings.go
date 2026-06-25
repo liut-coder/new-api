@@ -2,13 +2,14 @@ package controller
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
 func GetRankings(c *gin.Context) {
-	result, err := service.GetRankingsSnapshot(c.DefaultQuery("period", "week"))
+	result, err := service.GetTodayUsageRankingsSnapshot(time.Now())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,

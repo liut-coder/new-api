@@ -244,6 +244,20 @@ function formatUnixTime(timestamp: unknown): string {
   return new Date(seconds * 1000).toLocaleString()
 }
 
+function getVisualKeyRows(value: string | undefined): string[] {
+  if (!value) return ['']
+  const rows = value.replace(/\r/g, '').split('\n')
+  return rows.length > 0 ? rows : ['']
+}
+
+function formatVisualKeyRows(rows: string[]): string {
+  return rows.map((row) => row.replace(/\r/g, '')).join('\n')
+}
+
+function countConfiguredKeys(value: string | undefined): number {
+  return getVisualKeyRows(value).filter((row) => row.trim() !== '').length
+}
+
 function CardHeading({ title, icon }: { title: string; icon?: ReactNode }) {
   return (
     <div className='flex items-center gap-3'>
@@ -369,6 +383,7 @@ export function ChannelMutateDrawer({
   const currentModels = form.watch('models')
   const currentName = form.watch('name')
   const currentModelMapping = form.watch('model_mapping')
+  const currentKey = form.watch('key')
   const awsKeyType = form.watch('aws_key_type')
   const vertexKeyType = form.watch('vertex_key_type')
   const upstreamModelUpdateCheckEnabled = form.watch(
@@ -396,6 +411,10 @@ export function ChannelMutateDrawer({
   // Helper computed values
   const isBatchMode =
     multiKeyMode === 'batch' || multiKeyMode === 'multi_to_single'
+  const usesStructuredKeyEditor =
+    currentType === 57 || (currentType === 41 && vertexKeyType === 'json')
+  const usesVisualKeyEditor = !usesStructuredKeyEditor
+  const configuredKeyCount = countConfiguredKeys(currentKey)
   const isChannelDetailLoading = isEditing && isChannelLoading
   const supportsMultiKeyAddMode =
     currentType !== 57 && !(currentType === 41 && vertexKeyType === 'api_key')
@@ -944,6 +963,19 @@ export function ChannelMutateDrawer({
     async (data: ChannelFormValues) => {
       // Validate key is required when creating
       if (!isEditing && !data.key?.trim()) {
+        form.setError('key', {
+          type: 'manual',
+          message: ERROR_MESSAGES.REQUIRED_KEY,
+        })
+        return
+      }
+
+      if (
+        isEditing &&
+        data.multi_key_mode === 'multi_to_single' &&
+        data.key_mode === 'replace' &&
+        countConfiguredKeys(data.key) === 0
+      ) {
         form.setError('key', {
           type: 'manual',
           message: ERROR_MESSAGES.REQUIRED_KEY,
@@ -1866,12 +1898,97 @@ export function ChannelMutateDrawer({
                         />
                       )}
 
+                      {isEditing &&
+                        supportsMultiKeyAddMode &&
+                        !isMultiKeyChannel && (
+                          <FormField
+                            control={form.control}
+                            name='multi_key_mode'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Key Configuration')}</FormLabel>
+                                <Select
+                                  items={[
+                                    {
+                                      value: 'single',
+                                      label: t('Single Key'),
+                                    },
+                                    {
+                                      value: 'multi_to_single',
+                                      label: t(
+                                        'Multi-Key Mode (multiple keys, one channel)'
+                                      ),
+                                    },
+                                  ]}
+                                  onValueChange={field.onChange}
+                                  value={field.value}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='single'>
+                                        {t('Single Key')}
+                                      </SelectItem>
+                                      <SelectItem value='multi_to_single'>
+                                        {t(
+                                          'Multi-Key Mode (multiple keys, one channel)'
+                                        )}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {field.value === 'multi_to_single'
+                                    ? t(
+                                        'Keep this channel and rotate multiple upstream API keys inside it.'
+                                      )
+                                    : t(
+                                        'Leave this channel using one upstream API key.'
+                                      )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
+
+                      {isEditing && isMultiKeyChannel && (
+                        <div className='border-border/60 bg-muted/20 flex items-center justify-between gap-3 rounded-lg border px-3 py-2'>
+                          <div>
+                            <p className='text-sm font-medium'>
+                              {t('Multi-Key Mode (multiple keys, one channel)')}
+                            </p>
+                            <p className='text-muted-foreground text-xs'>
+                              {t(
+                                'This channel already rotates multiple upstream API keys.'
+                              )}
+                            </p>
+                          </div>
+                          <Badge variant='outline'>
+                            {t('{{count}} key(s)', {
+                              count:
+                                channelData?.data?.channel_info
+                                  ?.multi_key_size || 0,
+                            })}
+                          </Badge>
+                        </div>
+                      )}
+
                       <FormField
                         control={form.control}
                         name='key'
                         render={({ field }) => {
                           const keyPlaceholder = (() => {
                             if (isEditing) {
+                              if (multiKeyMode === 'multi_to_single') {
+                                return keyMode === 'replace'
+                                  ? t('Enter replacement key')
+                                  : t('Enter new key to append')
+                              }
                               return t('Leave empty to keep existing key')
                             }
                             if (currentType === 33) {
@@ -1897,16 +2014,123 @@ export function ChannelMutateDrawer({
                             }
                             return t(getKeyPromptForType(currentType))
                           })()
+                          const allowsMultipleKeyRows = isBatchMode
+                          const keyRows = allowsMultipleKeyRows
+                            ? getVisualKeyRows(field.value)
+                            : [field.value || '']
+                          const keyLabel = isBatchMode
+                            ? t('API Keys *')
+                            : t('API Key *')
+                          const updateKeyRows = (rows: string[]) => {
+                            field.onChange(formatVisualKeyRows(rows))
+                          }
                           return (
                             <FormItem>
-                              <FormLabel>{t('API Key *')}</FormLabel>
-                              <FormControl>
-                                <Textarea
-                                  placeholder={keyPlaceholder}
-                                  rows={isBatchMode ? 8 : 4}
-                                  {...field}
-                                />
-                              </FormControl>
+                              <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                                <FormLabel>{keyLabel}</FormLabel>
+                                {usesVisualKeyEditor && (
+                                  <Badge variant='outline' className='w-fit'>
+                                    {t('{{count}} key(s)', {
+                                      count: configuredKeyCount,
+                                    })}
+                                  </Badge>
+                                )}
+                              </div>
+                              {usesVisualKeyEditor ? (
+                                <FormControl>
+                                  <div className='space-y-2'>
+                                    {keyRows.map((key, index) => (
+                                      <div
+                                        key={index}
+                                        className='flex items-center gap-2'
+                                      >
+                                        <Input
+                                          value={key}
+                                          placeholder={
+                                            keyRows.length > 1
+                                              ? t('Key #{{index}}', {
+                                                  index: index + 1,
+                                                })
+                                              : keyPlaceholder
+                                          }
+                                          className='font-mono'
+                                          onBlur={field.onBlur}
+                                          onChange={(event) => {
+                                            const pastedRows =
+                                              allowsMultipleKeyRows
+                                                ? event.target.value
+                                                    .replace(/\r/g, '')
+                                                    .split('\n')
+                                                : [
+                                                    event.target.value.replace(
+                                                      /[\r\n]/g,
+                                                      ''
+                                                    ),
+                                                  ]
+                                            const nextRows = [...keyRows]
+                                            nextRows.splice(
+                                              index,
+                                              1,
+                                              ...pastedRows
+                                            )
+                                            updateKeyRows(nextRows)
+                                          }}
+                                        />
+                                        {(keyRows.length > 1 ||
+                                          key.trim() !== '') && (
+                                          <Button
+                                            type='button'
+                                            variant='ghost'
+                                            size='icon-sm'
+                                            aria-label={t('Remove key')}
+                                            onClick={() => {
+                                              const nextRows = keyRows.filter(
+                                                (_, rowIndex) =>
+                                                  rowIndex !== index
+                                              )
+                                              updateKeyRows(
+                                                nextRows.length > 0
+                                                  ? nextRows
+                                                  : ['']
+                                              )
+                                            }}
+                                          >
+                                            <Trash2
+                                              className='h-4 w-4'
+                                              aria-hidden='true'
+                                            />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {allowsMultipleKeyRows && (
+                                      <Button
+                                        type='button'
+                                        variant='outline'
+                                        size='sm'
+                                        className='w-fit'
+                                        onClick={() =>
+                                          updateKeyRows([...keyRows, ''])
+                                        }
+                                      >
+                                        <Plus
+                                          className='mr-2 h-4 w-4'
+                                          aria-hidden='true'
+                                        />
+                                        {t('Add key')}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </FormControl>
+                              ) : (
+                                <FormControl>
+                                  <Textarea
+                                    placeholder={keyPlaceholder}
+                                    rows={isBatchMode ? 8 : 4}
+                                    {...field}
+                                  />
+                                </FormControl>
+                              )}
                               <FormDescription>
                                 <div className='flex flex-col gap-2'>
                                   <span>
@@ -1915,7 +2139,7 @@ export function ChannelMutateDrawer({
                                         {t(
                                           'Enter new key to update, or leave empty to keep current key'
                                         )}
-                                        {isMultiKeyChannel && (
+                                        {multiKeyMode === 'multi_to_single' && (
                                           <span className='text-warning mt-1 block'>
                                             {t(
                                               'Multi-key channel: Keys will be'
@@ -1934,7 +2158,7 @@ export function ChannelMutateDrawer({
                                       t(FIELD_DESCRIPTIONS.KEY)
                                     )}
                                   </span>
-                                  {isBatchMode && (
+                                  {usesVisualKeyEditor && isBatchMode && (
                                     <Button
                                       type='button'
                                       variant='outline'
@@ -2049,7 +2273,7 @@ export function ChannelMutateDrawer({
                         </div>
                       )}
 
-                      {isEditing && isMultiKeyChannel && (
+                      {isEditing && multiKeyMode === 'multi_to_single' && (
                         <FormField
                           control={form.control}
                           name='key_mode'
@@ -2101,7 +2325,7 @@ export function ChannelMutateDrawer({
                         />
                       )}
 
-                      {!isEditing && multiKeyMode === 'multi_to_single' && (
+                      {multiKeyMode === 'multi_to_single' && (
                         <FormField
                           control={form.control}
                           name='multi_key_type'

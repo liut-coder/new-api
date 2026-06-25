@@ -136,3 +136,30 @@ export type RankingsSnapshot = {
   /** 100%-stacked area history of token share by vendor over the period. */
   vendor_share_history: VendorShareSeries
 }
+
+export type UsageRankingSummary = {
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export type UsageRankingRow = {
+  rank: number
+  user_id: number
+  username: string
+  token_id: number
+  token_name: string
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export type UsageRankingsSnapshot = {
+  period: 'today'
+  start_time: number
+  end_time: number
+  summary: UsageRankingSummary
+  rows: UsageRankingRow[]
+}

@@ -24,13 +24,19 @@ import { getUserModels } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Dialog } from '@/components/dialog'
+
+const DEFAULT_PROVIDER_NAME = 'Misk'
 
 const APP_CONFIGS = {
   claude: {
     label: 'Claude',
-    defaultName: 'My Claude',
+    defaultName: DEFAULT_PROVIDER_NAME,
     modelFields: [
       { key: 'model', labelKey: 'Primary Model', required: true },
       { key: 'haikuModel', labelKey: 'Haiku Model', required: false },
@@ -40,12 +46,12 @@ const APP_CONFIGS = {
   },
   codex: {
     label: 'Codex',
-    defaultName: 'My Codex',
+    defaultName: DEFAULT_PROVIDER_NAME,
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
   gemini: {
     label: 'Gemini',
-    defaultName: 'My Gemini',
+    defaultName: DEFAULT_PROVIDER_NAME,
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
 } as const
@@ -99,17 +105,34 @@ export function CCSwitchDialog(props: Props) {
   const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
   const [models, setModels] = useState<Record<string, string>>({})
 
-  const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch'],
+  const {
+    data: modelsData,
+    isLoading: isModelsLoading,
+    isError: isModelsError,
+  } = useQuery({
+    queryKey: ['user-models'],
     queryFn: getUserModels,
     enabled: props.open,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   const modelOptions = useMemo(() => {
-    const items = modelsData?.data ?? []
-    return items.map((m) => ({ value: m, label: m }))
+    const items = Array.isArray(modelsData?.data) ? modelsData.data : []
+    return items
+      .map((model) => model.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+      .map((model) => ({ value: model, label: model }))
   }, [modelsData?.data])
+
+  const modelEmptyText = isModelsLoading
+    ? 'Loading models...'
+    : isModelsError
+      ? 'Failed to load models'
+      : 'No models found'
+
+  const hasModelOptions = modelOptions.length > 0
 
   useEffect(() => {
     if (props.open) {
@@ -132,14 +155,18 @@ export function CCSwitchDialog(props: Props) {
   }
 
   const handleSubmit = () => {
-    if (!models.model) {
+    const normalizedModels = Object.fromEntries(
+      Object.entries(models).map(([key, value]) => [key, value.trim()])
+    )
+
+    if (!normalizedModels.model) {
       toast.warning(t('Please select a primary model'))
       return
     }
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
-    const url = buildCCSwitchURL(app, name, models, key)
+    const url = buildCCSwitchURL(app, name, normalizedModels, key)
     window.open(url, '_blank')
     props.onOpenChange(false)
   }
@@ -205,15 +232,43 @@ export function CCSwitchDialog(props: Props) {
                 <span className='text-destructive ml-0.5'>*</span>
               )}
             </Label>
-            <ComboboxInput
-              options={modelOptions}
-              value={models[field.key] || ''}
-              onValueChange={(v) =>
-                setModels((prev) => ({ ...prev, [field.key]: v }))
-              }
-              placeholder={t('Select or enter model name')}
-              emptyText={t('No models found')}
-            />
+            {hasModelOptions || isModelsLoading ? (
+              <NativeSelect
+                className='w-full'
+                value={models[field.key] || ''}
+                disabled={isModelsLoading}
+                onChange={(event) =>
+                  setModels((prev) => ({
+                    ...prev,
+                    [field.key]: event.target.value,
+                  }))
+                }
+              >
+                <NativeSelectOption value=''>
+                  {isModelsLoading
+                    ? t('Loading models...')
+                    : field.required
+                      ? t('Select model')
+                      : t('Not set')}
+                </NativeSelectOption>
+                {modelOptions.map((option) => (
+                  <NativeSelectOption key={option.value} value={option.value}>
+                    {option.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            ) : (
+              <ComboboxInput
+                options={[]}
+                value={models[field.key] || ''}
+                onValueChange={(v) =>
+                  setModels((prev) => ({ ...prev, [field.key]: v }))
+                }
+                placeholder={t('Select or enter model name')}
+                emptyText={modelEmptyText}
+                allowCustomValue={true}
+              />
+            )}
           </div>
         ))}
       </div>

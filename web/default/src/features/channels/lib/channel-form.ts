@@ -422,7 +422,9 @@ export function transformChannelToFormDefaults(
     header_override: channel.header_override || '',
     settings: channel.settings || '{}',
     other: channel.other || '',
-    multi_key_mode: 'single',
+    multi_key_mode: channel.channel_info.is_multi_key
+      ? 'multi_to_single'
+      : 'single',
     multi_key_type: channel.channel_info.multi_key_mode || 'random',
     batch_add_set_key_prefix_2_name: false,
     key_mode: 'append', // Default to append mode for editing multi-key channels
@@ -634,8 +636,14 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
 export function transformFormDataToUpdatePayload(
   formData: ChannelFormValues,
   channelId: number
-): Partial<Channel> {
-  const payload: Partial<Channel> = {
+): Partial<Channel> & {
+  multi_key_mode?: 'random' | 'polling'
+  key_mode?: 'append' | 'replace'
+} {
+  const payload: Partial<Channel> & {
+    multi_key_mode?: 'random' | 'polling'
+    key_mode?: 'append' | 'replace'
+  } = {
     id: channelId,
     name: formData.name,
     type: formData.type,
@@ -662,6 +670,11 @@ export function transformFormDataToUpdatePayload(
   // Only include key if it was changed (not empty)
   if (formData.key && formData.key.trim()) {
     payload.key = formData.key
+  }
+
+  if (formData.multi_key_mode === 'multi_to_single') {
+    payload.multi_key_mode = formData.multi_key_type || 'random'
+    payload.key_mode = formData.key_mode || 'append'
   }
 
   // Clean up empty strings to null for optional fields

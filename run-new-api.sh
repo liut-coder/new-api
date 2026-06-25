@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR=/opt/new-api-src
+APP_DIR=/root/new-api-src
 STATE_DIR=/root/new-api
 ENV_FILE="$STATE_DIR/.env"
 

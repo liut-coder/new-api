@@ -64,3 +64,18 @@ func TestOpenRouterAnthropicClaudeOpusUsesDefaultPricing(t *testing.T) {
 		t.Fatalf("GetCreateCacheRatio returned %v, want 1.25", createCacheRatio)
 	}
 }
+
+func TestUnknownModelFallsBackToDefaultRatio(t *testing.T) {
+	InitRatioSettings()
+
+	ratio, ok, matchName := GetModelRatio("totally-unknown-model-x1")
+	if !ok {
+		t.Fatalf("GetModelRatio returned ok=false, matchName=%q", matchName)
+	}
+	if ratio != 37.5 {
+		t.Fatalf("GetModelRatio returned %v, want 37.5", ratio)
+	}
+	if matchName != "totally-unknown-model-x1" {
+		t.Fatalf("GetModelRatio matchName = %q, want totally-unknown-model-x1", matchName)
+	}
+}

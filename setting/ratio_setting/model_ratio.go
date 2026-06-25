@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 )
 
@@ -14,6 +13,9 @@ const (
 	USD     = 500 // $0.002 = 1 -> $1 = 500
 	RMB     = USD / USD2RMB
 )
+
+// defaultFallbackModelRatio is used when a model has no explicit price or ratio.
+const defaultFallbackModelRatio = 37.5
 
 // modelRatio
 // https://platform.openai.com/docs/models/model-endpoint-compatibility
@@ -418,9 +420,8 @@ func GetModelRatio(name string) (float64, bool, string) {
 			if wildcardRatio, ok := modelRatioMap.Get(CompactWildcardModelKey); ok {
 				return wildcardRatio, true, name
 			}
-			//return 0, true, name
 		}
-		return 37.5, operation_setting.SelfUseModeEnabled, name
+		return defaultFallbackModelRatio, true, name
 	}
 	return ratio, true, name
 }
@@ -784,5 +785,5 @@ func GetModelRatioOrPrice(model string) (float64, bool, bool) { // price or rati
 	if success {
 		return modelRatio, false, true
 	}
-	return 37.5, false, false
+	return defaultFallbackModelRatio, false, true
 }

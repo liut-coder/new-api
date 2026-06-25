@@ -142,17 +142,20 @@ var defaultModelRatio = map[string]float64{
 	"claude-sonnet-4-5-20250929":                1.5,
 	"claude-opus-4-5-20251101":                  2.5,
 	"claude-opus-4-6":                           2.5,
+	"claude-opus-4-6-thinking":                  2.5,
 	"claude-opus-4-6-max":                       2.5,
 	"claude-opus-4-6-high":                      2.5,
 	"claude-opus-4-6-medium":                    2.5,
 	"claude-opus-4-6-low":                       2.5,
 	"claude-opus-4-7":                           2.5,
+	"claude-opus-4-7-thinking":                  2.5,
 	"claude-opus-4-7-max":                       2.5,
 	"claude-opus-4-7-xhigh":                     2.5,
 	"claude-opus-4-7-high":                      2.5,
 	"claude-opus-4-7-medium":                    2.5,
 	"claude-opus-4-7-low":                       2.5,
 	"claude-opus-4-8":                           2.5,
+	"claude-opus-4-8-thinking":                  2.5,
 	"claude-opus-4-8-max":                       2.5,
 	"claude-opus-4-8-xhigh":                     2.5,
 	"claude-opus-4-8-high":                      2.5,
@@ -729,6 +732,7 @@ func GetAudioCompletionRatioCopy() map[string]float64 {
 
 // 转换模型名，减少渠道必须配置各种带参数模型
 func FormatMatchingModelName(name string) string {
+	name = normalizeAnthropicClaudeOpusAlias(name)
 
 	if strings.HasPrefix(name, "gemini-2.5-flash-lite") {
 		name = handleThinkingBudgetModel(name, "gemini-2.5-flash-lite", "gemini-2.5-flash-lite-thinking-*")
@@ -744,6 +748,29 @@ func FormatMatchingModelName(name string) string {
 	if strings.HasPrefix(name, "gpt-4o-gizmo") {
 		name = "gpt-4o-gizmo-*"
 	}
+	return name
+}
+
+func normalizeAnthropicClaudeOpusAlias(name string) string {
+	const anthropicPrefix = "anthropic/"
+
+	prefixIndex := strings.LastIndex(name, anthropicPrefix)
+	if prefixIndex == -1 {
+		return name
+	}
+	if prefixIndex > 0 && name[prefixIndex-1] != '/' {
+		return name
+	}
+
+	model := name[prefixIndex+len(anthropicPrefix):]
+	for _, version := range []string{"4.6", "4.7", "4.8"} {
+		aliasPrefix := "claude-opus-" + version
+		if model == aliasPrefix || strings.HasPrefix(model, aliasPrefix+"-") {
+			normalizedVersion := strings.ReplaceAll(version, ".", "-")
+			return "claude-opus-" + normalizedVersion + strings.TrimPrefix(model, aliasPrefix)
+		}
+	}
+
 	return name
 }
 
